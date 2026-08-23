@@ -1,0 +1,320 @@
+local GameplayFolder = workspace:WaitForChild("GameplayFolder")
+local Rooms = GameplayFolder:WaitForChild("Rooms")
+
+local TARGET_MASS = 0
+
+-- TẢI VÀ CACHE ÂM THANH RƠI TỪ GITHUB
+local FALL_SOUND_URL = "https://github.com/vuivuiviu2/Pressure-/raw/refs/heads/main/roi.mp3.mp3"
+local FALL_SOUND_ASSET = nil
+
+local function loadGitSound(url, filename)
+	local success, result = pcall(function()
+		if not isfile(filename .. ".mp3") then
+			writefile(filename .. ".mp3", game:HttpGet(url))
+		end
+		return (getcustomasset or getsynasset)(filename .. ".mp3")
+	end)
+	if success then
+		return result
+	end
+	return nil
+end
+
+FALL_SOUND_ASSET = loadGitSound(FALL_SOUND_URL, "fall_impact_sound")
+
+-- CHỈ các Model chứa chính xác từ khóa này mới bị văng
+local whitelist = {
+	"hadal crate",
+	"worklight",
+	"scaffolding",
+	"drawer",
+	"itemlocker",
+	"lockershelf"
+}
+
+-- Danh sách vật phẩm bảo vệ tuyệt đối
+local protectedItems = {
+	"normalkeycard",
+	"ridgekeycard",
+	"innerkeycard",
+	"password paper",
+	"passwordpaper"
+}
+
+-- Kiểm tra Whitelist
+local function isWhitelisted(object)
+	local name = string.lower(object.Name)
+
+	-- BẢO VỆ TỦ TRỐN
+	if string.find(name, "hiding", 1, true) then
+		return false
+	end
+
+	for _, keyword in ipairs(whitelist) do
+		if string.find(name, keyword, 1, true) then
+			return true
+		end
+	end
+	return false
+end
+
+-- Kiểm tra sự tồn tại của vật phẩm quan trọng
+local function hasProtectedItem(model)
+	for _, desc in ipairs(model:GetDescendants()) do
+		local descName = string.lower(desc.Name)
+		for _, itemName in ipairs(protectedItems) do
+			if descName == itemName or string.find(descName, itemName, 1, true) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local function isInside(instance, model)
+	return instance == model or instance:IsDescendantOf(model)
+end
+
+-- Tác động lực đẩy văng
+local function shakeCollision(collision)
+	if not collision or not collision.Parent or collision.Anchored then
+		return
+	end
+
+	local mass = 10
+	pcall(function()
+		mass = collision.AssemblyMass
+	end)
+
+	local force = mass * 8
+
+	for i = 1, 8 do
+		if collision and collision.Parent and not collision.Anchored then
+			pcall(function()
+				local look = collision.CFrame.LookVector
+				look = Vector3.new(look.X, 0, look.Z)
+
+				if look.Magnitude > 0 then
+					look = look.Unit
+					local angle = math.rad(math.random(-60, 60))
+					local direction = CFrame.fromAxisAngle(
+						Vector3.yAxis,
+						angle
+					):VectorToWorldSpace(look)
+
+					direction = Vector3.new(direction.X, 0, direction.Z).Unit
+
+					collision:ApplyImpulse(direction * force)
+					collision:ApplyAngularImpulse(
+						Vector3.new(
+							math.random(-1, 1),
+							math.random(-1, 1),
+							math.random(-1, 1)
+						) * mass * 22
+					)
+				end
+			end)
+			task.wait(0.03)
+		else
+			break
+		end
+	end
+end
+
+local function setupModel(model, room, targets)
+	if not model:IsA("Model") then return end
+	if not isWhitelisted(model) then return end
+	if hasProtectedItem(model) then return end
+
+	local existingCollision
+	local hasScriptCollision = false
+
+	for _, v in ipairs(model:GetDescendants()) do
+		if v:IsA("BasePart") and v.Name == "Collision" and v:GetAttribute("WindCollision") == true then
+			hasScriptCollision = true
+			if v:GetAttribute("Picked") ~= true then
+				existingCollision = v
+				break
+			end
+		end
+	end
+
+	if existingCollision then
+		table.insert(targets, existingCollision)
+		return
+	end
+
+	if hasScriptCollision then return end
+
+	local parts = {}
+	for _, v in ipairs(model:GetDescendants()) do
+		if v:IsA("BasePart") and v.Name ~= "Collision" then
+			table.insert(parts, v)
+		end
+	end
+
+	if #parts == 0 then return end
+
+	local cf, size
+	local successBox = pcall(function()
+		cf, size = model:GetBoundingBox()
+	end)
+
+	if not successBox or not cf or not size then return end
+
+	local volume = size.X * size.Y * size.Z
+	if volume <= 0 then return end
+
+	local density = math.clamp(TARGET_MASS / volume, 0.0001, 100)
+
+	local collision = Instance.new("Part")
+	collision.Name = "Collision"
+	collision.Size = size
+	collision.CFrame = cf
+
+	collision.Transparency = 1
+	collision.CanCollide = true
+	collision.CanTouch = true
+	collision.CanQuery = true
+	collision.CastShadow = false
+	collision.Anchored = true
+	collision.Massless = false
+
+	pcall(function()
+		collision.CustomPhysicalProperties = PhysicalProperties.new(density, 0.3, 0.5, 1, 1)
+	end)
+
+	collision:SetAttribute("WindCollision", true)
+	collision:SetAttribute("Picked", false)
+
+	-- THÊM ÂM THANH RƠI 3D (Ngẫu nhiên 50% số vật thể)
+	if FALL_SOUND_ASSET and math.random() <= 0.5 then
+		local sound = Instance.new("Sound")
+		sound.Name = "FallSound3D"
+		sound.SoundId = FALL_SOUND_ASSET
+		
+		-- Cấu hình âm thanh 3D
+		sound.RollOffMinDistance = 10
+		sound.RollOffMaxDistance = 80
+		sound.RollOffMode = Enum.RollOffMode.Inverse
+		sound.Parent = collision
+
+		local touchConnection
+		touchConnection = collision.Touched:Connect(function(hitPart)
+			if not hitPart or hitPart:IsDescendantOf(model) then return end
+			
+			if not collision.Anchored then
+				-- ĐẢM BẢO CHỈ PHÁT 1 LẦN: Hủy kết nối ngay lập tức
+				if touchConnection then
+					touchConnection:Disconnect()
+					touchConnection = nil
+				end
+
+				-- Tốc độ phát ngẫu nhiên (0.88 - 1.15) & Âm lượng ngẫu nhiên (1.2 - 1.8)
+				sound.PlaybackSpeed = math.random(88, 115) / 100
+				sound.Volume = math.random(12, 18) / 10
+
+				pcall(function()
+					sound:Play()
+				end)
+
+				-- Hủy Instance Sound sau khi phát xong
+				sound.Ended:Connect(function()
+					pcall(function()
+						sound:Destroy()
+					end)
+				end)
+			end
+		end)
+	end
+
+	collision.Parent = model
+	table.insert(targets, collision)
+
+	-- KÍCH HOẠT VĂNG & DỌN DẸP
+	collision:GetPropertyChangedSignal("Anchored"):Connect(function()
+		if not collision.Anchored then
+			task.spawn(shakeCollision, collision)
+
+			-- Tự động dọn dẹp sau 30 giây
+			task.delay(30, function()
+				if model and model.Parent then
+					pcall(function()
+						model:Destroy()
+					end)
+				end
+			end)
+		end
+	end)
+
+	-- Gỡ Weld nối ra bên ngoài
+	for _, v in ipairs(model:GetDescendants()) do
+		if v:IsA("WeldConstraint") or v:IsA("Weld") or v:IsA("ManualWeld") or v:IsA("Motor6D") or v:IsA("Snap") or v:IsA("Glue") or v:IsA("RigidConstraint") then
+			pcall(function()
+				local p0 = v.Part0
+				local p1 = v.Part1
+				if p0 and p1 then
+					if isInside(p0, model) ~= isInside(p1, model) then
+						v:Destroy()
+					end
+				end
+			end)
+		end
+	end
+
+	-- Hàn Part vào khối Collision
+	for _, part in ipairs(parts) do
+		pcall(function()
+			part.Anchored = false
+			part.CanCollide = false
+			part.CanTouch = false
+			part.CanQuery = false
+			part.Massless = true
+
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0 = collision
+			weld.Part1 = part
+			weld.Parent = collision
+		end)
+	end
+end
+
+local function processRoom(room)
+	if not room or not room.Parent then return end
+
+	local targets = {}
+	for _, v in ipairs(room:GetDescendants()) do
+		if v:IsA("Model") then
+			setupModel(v, room, targets)
+		end
+	end
+
+	-- Delay ngẫu nhiên từ 0.0 đến 1.0 giây cho từng vật thể
+	for _, collision in ipairs(targets) do
+		if collision and collision.Parent and collision:GetAttribute("WindCollision") == true then
+			local randomDelay = math.random()
+			task.delay(randomDelay, function()
+				if collision and collision.Parent then
+					pcall(function()
+						collision.Anchored = false
+					end)
+				end
+			end)
+		end
+	end
+end
+
+-- Xử lý các phòng hiện tại
+for _, room in ipairs(Rooms:GetChildren()) do
+	if room:IsA("Model") then
+		task.spawn(processRoom, room)
+	end
+end
+
+-- Xử lý khi Pressure spawn phòng mới
+Rooms.ChildAdded:Connect(function(room)
+	if room:IsA("Model") then
+		task.wait(1)
+		processRoom(room)
+	end
+end)
