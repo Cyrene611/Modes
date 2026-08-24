@@ -1,3 +1,6 @@
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
 local GameplayFolder = workspace:WaitForChild("GameplayFolder")
 local Rooms = GameplayFolder:WaitForChild("Rooms")
 
@@ -204,13 +207,12 @@ local function setupModel(model, room, targets)
 			if not hitPart or hitPart:IsDescendantOf(model) then return end
 			
 			if not collision.Anchored then
-				-- ĐẢM BẢO CHỈ PHÁT 1 LẦN: Hủy kết nối ngay lập tức
+				-- ĐẢM BẢO CHỈ PHÁT 1 LẦN
 				if touchConnection then
 					touchConnection:Disconnect()
 					touchConnection = nil
 				end
 
-				-- Tốc độ phát ngẫu nhiên (0.88 - 1.15) & Âm lượng ngẫu nhiên (1.2 - 1.8)
 				sound.PlaybackSpeed = math.random(88, 115) / 100
 				sound.Volume = math.random(12, 18) / 10
 
@@ -218,7 +220,6 @@ local function setupModel(model, room, targets)
 					sound:Play()
 				end)
 
-				-- Hủy Instance Sound sau khi phát xong
 				sound.Ended:Connect(function()
 					pcall(function()
 						sound:Destroy()
@@ -304,17 +305,49 @@ local function processRoom(room)
 	end
 end
 
--- Xử lý các phòng hiện tại
-for _, room in ipairs(Rooms:GetChildren()) do
-	if room:IsA("Model") then
-		task.spawn(processRoom, room)
+-- ==========================================
+-- CHẠY DUY NHẤT 1 LẦN CHO PHÒNG GẦN NHẤT
+-- ==========================================
+local function runOnce()
+	local allRooms = Rooms:GetChildren()
+	if #allRooms == 0 then return end
+
+	local char = LocalPlayer.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+	local targetRoom = nil
+
+	-- Tìm phòng ở gần vị trí người chơi nhất
+	if hrp then
+		local closestDist = math.huge
+		for _, room in ipairs(allRooms) do
+			if room:IsA("Model") then
+				local primary = room.PrimaryPart or room:FindFirstChildWhichIsA("BasePart")
+				if primary then
+					local dist = (primary.Position - hrp.Position).Magnitude
+					if dist < closestDist then
+						closestDist = dist
+						targetRoom = room
+					end
+				end
+			end
+		end
+	end
+
+	-- Nếu không xác định được khoảng cách thì lấy phòng đầu tiên
+	if not targetRoom then
+		for _, room in ipairs(allRooms) do
+			if room:IsA("Model") then
+				targetRoom = room
+				break
+			end
+		end
+	end
+
+	-- Thực thi đúng 1 phòng duy nhất
+	if targetRoom then
+		processRoom(targetRoom)
 	end
 end
 
--- Xử lý khi Pressure spawn phòng mới
-Rooms.ChildAdded:Connect(function(room)
-	if room:IsA("Model") then
-		task.wait(1)
-		processRoom(room)
-	end
-end)
+runOnce()
