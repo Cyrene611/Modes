@@ -170,7 +170,7 @@ coroutine.wrap(function()
     currentCC.Saturation = 0
     currentCC.TintColor = Color3.fromRGB(255, 255, 255)
 
-    local fadeInInfo = TweenInfo.new(1, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+    local fadeInInfo = TweenInfo.new(2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
     local fadeInTween = tweenService:Create(currentCC, fadeInInfo, {
         TintColor = Color3.fromRGB(255, 2, 2),
         Contrast = 0.1,
@@ -195,7 +195,7 @@ end)()
 task.spawn(function()
     local Config = {
         TargetColor = Color3.fromRGB(240, 0, 0), 
-        TweenTime = 1,                         
+        TweenTime = 2,                         
     }
 
     local Workspace = workspace
