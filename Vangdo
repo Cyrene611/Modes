@@ -2,9 +2,9 @@ local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
 local GameplayFolder = workspace:WaitForChild("GameplayFolder")
-local Rooms = GameplayFolder:WaitForChild("Rooms")
 
 local TARGET_MASS = 0
+local SEARCH_RADIUS = 200 -- Bán kính 200 stud quanh người chơi
 
 -- TẢI VÀ CACHE ÂM THANH RƠI TỪ GITHUB
 local FALL_SOUND_URL = "https://github.com/vuivuiviu2/Pressure-/raw/refs/heads/main/roi.mp3.mp3"
@@ -124,7 +124,7 @@ local function shakeCollision(collision)
 	end
 end
 
-local function setupModel(model, room, targets)
+local function setupModel(model, targets)
 	if not model:IsA("Model") then return end
 	if not isWhitelisted(model) then return end
 	if hasProtectedItem(model) then return end
@@ -198,7 +198,7 @@ local function setupModel(model, room, targets)
 		
 		-- Cấu hình âm thanh 3D
 		sound.RollOffMinDistance = 10
-		sound.RollOffMaxDistance = 80
+		sound.RollOffMaxDistance = 100
 		sound.RollOffMode = Enum.RollOffMode.Inverse
 		sound.Parent = collision
 
@@ -207,13 +207,12 @@ local function setupModel(model, room, targets)
 			if not hitPart or hitPart:IsDescendantOf(model) then return end
 			
 			if not collision.Anchored then
-				-- ĐẢM BẢO CHỈ PHÁT 1 LẦN
 				if touchConnection then
 					touchConnection:Disconnect()
 					touchConnection = nil
 				end
 
-				sound.PlaybackSpeed = math.random(88, 115) / 100
+				sound.PlaybackSpeed = math.random(55, 115) / 100
 				sound.Volume = math.random(12, 18) / 10
 
 				pcall(function()
@@ -280,20 +279,34 @@ local function setupModel(model, room, targets)
 	end
 end
 
-local function processRoom(room)
-	if not room or not room.Parent then return end
+-- ==========================================
+-- CHẠY DUY NHẤT 1 LẦN TRONG BÁN KÍNH 200 STUD
+-- ==========================================
+local function runOnceInRadius()
+	local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
 
+	local playerPos = hrp.Position
 	local targets = {}
-	for _, v in ipairs(room:GetDescendants()) do
+
+	-- Chỉ quét bên trong GameplayFolder
+	for _, v in ipairs(GameplayFolder:GetDescendants()) do
 		if v:IsA("Model") then
-			setupModel(v, room, targets)
+			local primary = v.PrimaryPart or v:FindFirstChildWhichIsA("BasePart")
+			if primary then
+				local dist = (primary.Position - playerPos).Magnitude
+				if dist <= SEARCH_RADIUS then
+					setupModel(v, targets)
+				end
+			end
 		end
 	end
 
-	-- Delay ngẫu nhiên từ 0.0 đến 1.0 giây cho từng vật thể
+	-- Delay ngẫu nhiên từ 0.0 đến 3.0 giây rồi cho văng đồng loạt
 	for _, collision in ipairs(targets) do
 		if collision and collision.Parent and collision:GetAttribute("WindCollision") == true then
-			local randomDelay = math.random()
+			local randomDelay = math.random() * 3
 			task.delay(randomDelay, function()
 				if collision and collision.Parent then
 					pcall(function()
@@ -305,49 +318,4 @@ local function processRoom(room)
 	end
 end
 
--- ==========================================
--- CHẠY DUY NHẤT 1 LẦN CHO PHÒNG GẦN NHẤT
--- ==========================================
-local function runOnce()
-	local allRooms = Rooms:GetChildren()
-	if #allRooms == 0 then return end
-
-	local char = LocalPlayer.Character
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-
-	local targetRoom = nil
-
-	-- Tìm phòng ở gần vị trí người chơi nhất
-	if hrp then
-		local closestDist = math.huge
-		for _, room in ipairs(allRooms) do
-			if room:IsA("Model") then
-				local primary = room.PrimaryPart or room:FindFirstChildWhichIsA("BasePart")
-				if primary then
-					local dist = (primary.Position - hrp.Position).Magnitude
-					if dist < closestDist then
-						closestDist = dist
-						targetRoom = room
-					end
-				end
-			end
-		end
-	end
-
-	-- Nếu không xác định được khoảng cách thì lấy phòng đầu tiên
-	if not targetRoom then
-		for _, room in ipairs(allRooms) do
-			if room:IsA("Model") then
-				targetRoom = room
-				break
-			end
-		end
-	end
-
-	-- Thực thi đúng 1 phòng duy nhất
-	if targetRoom then
-		processRoom(targetRoom)
-	end
-end
-
-runOnce()
+runOnceInRadius()
